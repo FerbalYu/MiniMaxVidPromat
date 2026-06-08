@@ -125,30 +125,61 @@ class MiniMaxClient:
 
 
 def parse_prompt_result(content: str) -> PromptResult:
-    try:
-        data = json.loads(content)
-    except json.JSONDecodeError:
-        start = content.find("{")
-        end = content.rfind("}")
-        if start >= 0 and end > start:
-            try:
-                data = json.loads(content[start : end + 1])
-            except json.JSONDecodeError:
-                data = {"raw_text": content}
-        else:
-            data = {"raw_text": content}
+    data = _parse_json_object(content)
     return PromptResult(
-        summary=str(data.get("summary", "")),
-        subject=str(data.get("subject", "")),
-        scene=str(data.get("scene", "")),
-        action=str(data.get("action", "")),
-        camera=str(data.get("camera", "")),
-        lighting=str(data.get("lighting", "")),
-        style=str(data.get("style", "")),
-        seedance_prompt=str(data.get("seedance_prompt", "")),
-        storyboard_prompt=str(data.get("storyboard_prompt", "")),
-        negative_prompt=str(data.get("negative_prompt", "")),
-        english_prompt=str(data.get("english_prompt", "")),
+        summary=_stringify_field(data.get("summary", "")),
+        subject=_stringify_field(data.get("subject", "")),
+        scene=_stringify_field(data.get("scene", "")),
+        action=_stringify_field(data.get("action", "")),
+        camera=_stringify_field(data.get("camera", "")),
+        lighting=_stringify_field(data.get("lighting", "")),
+        style=_stringify_field(data.get("style", "")),
+        seedance_prompt=_stringify_field(data.get("seedance_prompt", "")),
+        storyboard_prompt=_stringify_field(data.get("storyboard_prompt", "")),
+        negative_prompt=_stringify_field(data.get("negative_prompt", "")),
+        english_prompt=_stringify_field(data.get("english_prompt", "")),
         raw_text=str(data.get("raw_text", content)),
     )
 
+
+def _parse_json_object(content: str) -> dict[str, Any]:
+    cleaned = content.strip()
+    if cleaned.startswith("```"):
+        lines = cleaned.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        cleaned = "\n".join(lines).strip()
+
+    for candidate in (cleaned, _extract_json_object(cleaned)):
+        if not candidate:
+            continue
+        try:
+            data = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, dict):
+            nested = data.get("result")
+            if isinstance(nested, dict):
+                return nested
+            return data
+    return {"raw_text": content}
+
+
+def _extract_json_object(content: str) -> str:
+    start = content.find("{")
+    end = content.rfind("}")
+    if start >= 0 and end > start:
+        return content[start : end + 1]
+    return ""
+
+
+def _stringify_field(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False)
+    return str(value)

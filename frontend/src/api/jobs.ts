@@ -8,15 +8,30 @@ apiClient.interceptors.response.use(
   (response) => response,
   (error: unknown) => {
     if (axios.isAxiosError(error)) {
-      const detail = error.response?.data?.detail
-      if (typeof detail === 'string') {
-        return Promise.reject(new Error(detail))
-      }
-      return Promise.reject(new Error(error.message || '请求失败'))
+      const message = formatApiError(error.response?.data?.detail) || error.message || '请求失败'
+      return Promise.reject(new Error(message))
     }
     return Promise.reject(error)
   },
 )
+
+function formatApiError(detail: unknown): string {
+  if (typeof detail === 'string') return detail
+  if (Array.isArray(detail)) {
+    return detail
+      .map((item) => {
+        if (typeof item === 'string') return item
+        if (item && typeof item === 'object' && 'msg' in item) return String(item.msg)
+        return ''
+      })
+      .filter(Boolean)
+      .join('；')
+  }
+  if (detail && typeof detail === 'object' && 'msg' in detail) {
+    return String(detail.msg)
+  }
+  return ''
+}
 
 export type JobStatus = 'queued' | 'processing' | 'completed' | 'failed'
 export type PromptMode = 'standard' | 'cinematic' | 'product' | 'short_drama'

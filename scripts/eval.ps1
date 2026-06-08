@@ -3,6 +3,20 @@ $ErrorActionPreference = "Stop"
 $root = Resolve-Path (Join-Path $PSScriptRoot "..")
 $results = [ordered]@{}
 
+function Invoke-Native {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$FilePath,
+        [Parameter(ValueFromRemainingArguments = $true)]
+        [string[]]$Arguments
+    )
+
+    & $FilePath @Arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "$FilePath exited with code $LASTEXITCODE"
+    }
+}
+
 function Invoke-Step {
     param(
         [string]$Name,
@@ -23,7 +37,7 @@ function Invoke-Step {
 Invoke-Step "frontend build" {
     Push-Location (Join-Path $root "frontend")
     try {
-        npm run build
+        Invoke-Native npm run build
     }
     finally {
         Pop-Location
@@ -33,7 +47,7 @@ Invoke-Step "frontend build" {
 Invoke-Step "backend compile" {
     Push-Location (Join-Path $root "backend")
     try {
-        python -m compileall app
+        Invoke-Native python -m compileall app
     }
     finally {
         Pop-Location
@@ -43,10 +57,31 @@ Invoke-Step "backend compile" {
 Invoke-Step "backend import" {
     Push-Location (Join-Path $root "backend")
     try {
-        python -c "from app.main import app; print(app.title)"
+        Invoke-Native python -c "from app.main import app; print(app.title)"
     }
     finally {
         Pop-Location
+    }
+}
+
+Invoke-Step "backend smoke" {
+    Push-Location (Join-Path $root "backend")
+    try {
+        Invoke-Native python tests/smoke_api.py
+    }
+    finally {
+        Pop-Location
+    }
+}
+
+Invoke-Step "powershell syntax" {
+    Get-ChildItem -Path (Join-Path $root "scripts") -Filter "*.ps1" | ForEach-Object {
+        $tokens = $null
+        $errors = $null
+        [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$tokens, [ref]$errors) | Out-Null
+        if ($errors.Count -gt 0) {
+            throw "$($_.Name) has PowerShell syntax errors: $($errors[0].Message)"
+        }
     }
 }
 
@@ -60,4 +95,3 @@ $payload = [ordered]@{
 }
 $payload | ConvertTo-Json -Depth 5 | Set-Content -Encoding UTF8 $reportPath
 Write-Host "Eval passed. Report: $reportPath"
-

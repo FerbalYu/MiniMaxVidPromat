@@ -40,6 +40,12 @@ Copy-Item .env.example .env.local
 npm run dev
 ```
 
+也可以在项目根目录一键启动前后端开发服务：
+
+```powershell
+.\scripts\dev.ps1
+```
+
 手机访问：
 
 ```text
@@ -87,3 +93,21 @@ MINIMAX_FILE_PURPOSE=vision
 ```
 
 MiniMax 的 Files API 在视频场景下的 `purpose` 如有变化，只需要改 `MINIMAX_FILE_PURPOSE`。
+
+## 自动化验证与进化
+
+本项目提供统一验证脚本：
+
+```powershell
+.\scripts\eval.ps1
+```
+
+它会执行前端构建、后端编译、后端导入和 API smoke 测试。
+
+创建一次 autoresearch 进化运行：
+
+```powershell
+.\scripts\evolve.ps1 -Rounds 10 -Goal "提升稳定性、提示词质量和手机端体验"
+```
+
+具体适应度函数和候选报告格式见 `docs/AUTORESEARCH.md`。

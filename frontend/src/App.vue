@@ -172,7 +172,8 @@ async function submitVideo() {
 }
 
 function pollJob(jobId: string) {
-  pollingTimer.value = window.setInterval(async () => {
+  stopPolling()
+  const tick = async () => {
     try {
       const currentJob = await getJob(jobId)
       if (activeJobId.value !== jobId) return
@@ -181,22 +182,27 @@ function pollJob(jobId: string) {
         stopPolling()
         activeJobId.value = ''
         showSuccessToast('提示词生成完成')
+        return
       }
       if (job.value.status === 'failed') {
         stopPolling()
         activeJobId.value = ''
         showFailToast('处理失败')
+        return
       }
+      pollingTimer.value = window.setTimeout(tick, 1800)
     } catch (error) {
       stopPolling()
+      activeJobId.value = ''
       showFailToast(error instanceof Error ? error.message : '查询任务失败')
     }
-  }, 1800)
+  }
+  void tick()
 }
 
 function stopPolling() {
   if (pollingTimer.value) {
-    window.clearInterval(pollingTimer.value)
+    window.clearTimeout(pollingTimer.value)
     pollingTimer.value = null
   }
 }

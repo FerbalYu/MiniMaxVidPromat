@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .config import get_settings
 from .jobs import job_store
 from .minimax_client import MiniMaxClient
-from .schemas import CreateJobResponse, JobPublic, JobStatus, PromptMode
+from .schemas import CreateJobResponse, JobPublic, JobRecord, JobStatus, PromptMode
 
 settings = get_settings()
 UPLOAD_CHUNK_SIZE = 1024 * 1024
@@ -86,12 +86,12 @@ def get_job(job_id: str) -> JobPublic:
     job = job_store.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="任务不存在")
-    return JobPublic(**job.model_dump())
+    return _to_public_job(job)
 
 
 @app.get("/api/jobs", response_model=list[JobPublic])
 def list_jobs() -> list[JobPublic]:
-    return [JobPublic(**job.model_dump()) for job in job_store.list_recent()]
+    return [_to_public_job(job) for job in job_store.list_recent()]
 
 
 def process_job(job_id: str) -> None:
@@ -142,3 +142,9 @@ def _max_upload_size_mb() -> int:
 
 def _max_upload_size_bytes() -> int:
     return _max_upload_size_mb() * 1024 * 1024
+
+
+def _to_public_job(job: JobRecord) -> JobPublic:
+    payload = job.model_dump()
+    payload["meta"] = {key: value for key, value in job.meta.items() if key != "path"}
+    return JobPublic(**payload)
