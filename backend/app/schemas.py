@@ -9,6 +9,7 @@ class JobStatus(str, Enum):
     processing = "processing"
     completed = "completed"
     failed = "failed"
+    canceled = "canceled"
 
 
 class PromptMode(str, Enum):
@@ -21,6 +22,12 @@ class PromptMode(str, Enum):
 class CreateJobResponse(BaseModel):
     job_id: str
     status: JobStatus
+
+
+class JobActionResponse(BaseModel):
+    job_id: str
+    status: JobStatus
+    message: str
 
 
 class PromptResult(BaseModel):
@@ -68,4 +75,3 @@ class JobPublic(BaseModel):
     created_at: float
     updated_at: float
     meta: dict[str, Any]
-

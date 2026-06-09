@@ -24,25 +24,27 @@ class MiniMaxClient:
         if not settings.minimax_api_key:
             raise RuntimeError("缺少 MINIMAX_API_KEY，请在 backend/.env 中配置 MiniMax API Key。")
         self.settings = settings
-        self.client = OpenAI(api_key=settings.minimax_api_key, base_url=settings.minimax_base_url)
+        self.client = OpenAI(
+            api_key=settings.minimax_api_key,
+            base_url=settings.minimax_base_url,
+            timeout=settings.minimax_request_timeout_seconds,
+        )
 
     def analyze_video(self, video_path: Path, *, prompt_mode: PromptMode, language: str) -> PromptResult:
         video_url = self._build_video_url(video_path)
-        prompt = self._build_prompt(prompt_mode=prompt_mode, language=language)
-        response = self.client.chat.completions.create(
-            model=self.settings.minimax_model,
-            messages=[
+        fact_content = self._create_json_completion(
+            [
                 {
                     "role": "system",
                     "content": (
-                        "你是视频理解与提示词工程专家，专门把真实视频内容改写为即梦/Seedance 2.0 "
-                        "可直接使用的视频生成提示词。你必须基于视频事实，不要编造视频里不存在的主体。"
+                        "你是严谨的视频事实分析器。只记录视频中能观察到的事实，"
+                        "不要补写品牌、地点、身份或未出现的元素。"
                     ),
                 },
                 {
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": prompt},
+                        {"type": "text", "text": self._build_fact_prompt()},
                         {
                             "type": "video_url",
                             "video_url": {
@@ -54,12 +56,67 @@ class MiniMaxClient:
                     ],
                 },
             ],
-            max_completion_tokens=3500,
+            max_tokens=2000,
+        )
+        facts = _parse_json_object(fact_content)
+        if self.settings.minimax_repair_json and "raw_text" in facts:
+            facts = _parse_json_object(self._repair_json(fact_content, target="video facts"))
+
+        prompt_content = self._create_json_completion(
+            [
+                {
+                    "role": "system",
+                    "content": (
+                        "你是视频生成提示词工程专家，专门把视频事实改写为即梦/Seedance 2.0 "
+                        "可直接使用的提示词。必须忠于事实，不要添加视频中不存在的主体。"
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": self._build_prompt(
+                        prompt_mode=prompt_mode,
+                        language=language,
+                        facts=facts,
+                    ),
+                },
+            ],
+            max_tokens=3500,
+        )
+        result = parse_prompt_result(prompt_content)
+        if self.settings.minimax_repair_json and not result.seedance_prompt:
+            repaired = self._repair_json(prompt_content, target="final prompt result")
+            result = parse_prompt_result(repaired)
+        if result.raw_text == prompt_content:
+            result.raw_text = json.dumps({"facts": facts, "prompt_result": prompt_content}, ensure_ascii=False)
+        return result
+
+    def _create_json_completion(self, messages: list[dict[str, Any]], *, max_tokens: int) -> str:
+        response = self.client.chat.completions.create(
+            model=self.settings.minimax_model,
+            messages=messages,
+            max_completion_tokens=max_tokens,
             response_format={"type": "json_object"},
             extra_body={"thinking": {"type": "disabled"}},
         )
-        content = response.choices[0].message.content or ""
-        return parse_prompt_result(content)
+        return response.choices[0].message.content or ""
+
+    def _repair_json(self, content: str, *, target: str) -> str:
+        return self._create_json_completion(
+            [
+                {
+                    "role": "system",
+                    "content": "你是 JSON 修复器。只输出一个合法 JSON 对象，不输出 Markdown 或解释。",
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"请把下面的 {target} 修复为合法 JSON 对象，保留所有可用信息，"
+                        f"缺失字段用空字符串：\n{content}"
+                    ),
+                },
+            ],
+            max_tokens=2500,
+        )
 
     def _build_video_url(self, video_path: Path) -> str:
         size_mb = video_path.stat().st_size / 1024 / 1024
@@ -91,14 +148,38 @@ class MiniMaxClient:
             raise RuntimeError(f"MiniMax Files API 未返回 file_id：{payload}")
         return str(file_id)
 
-    def _build_prompt(self, *, prompt_mode: PromptMode, language: str) -> str:
+    def _build_fact_prompt(self) -> str:
+        return """
+请分析这个视频，只输出 JSON，字段如下：
+{
+  "summary": "视频事实摘要，50-120字",
+  "subjects": ["主体列表，包括人物/物体/服饰/外观"],
+  "scene": "场景与环境",
+  "actions": ["动作过程与节奏"],
+  "camera": "运镜、景别、机位、镜头运动",
+  "lighting": "光线、色彩、氛围",
+  "style": "画面风格、质感、清晰度",
+  "visible_text": ["视频中真实可见文字，没有则为空数组"],
+  "uncertainties": ["无法确定但影响提示词的点，没有则为空数组"]
+}
+
+要求：
+1. 只写视频中可观察的事实。
+2. 不要推断品牌、地点、身份、时代背景。
+3. 不要输出 Markdown，不要在 JSON 外输出解释。
+""".strip()
+
+    def _build_prompt(self, *, prompt_mode: PromptMode, language: str, facts: dict[str, Any]) -> str:
         mode_label = MODE_LABELS.get(prompt_mode, MODE_LABELS[PromptMode.standard])
         output_language = "中文为主，英文版单独给出" if language == "zh" else "英文为主，中文版可简短给出"
         return f"""
-请分析这个视频，并把它转换成适合即梦/Seedance 2.0 的视频生成提示词。
+请根据下面的视频事实 JSON，把它转换成适合即梦/Seedance 2.0 的视频生成提示词。
 
 目标风格：{mode_label}
 输出语言：{output_language}
+
+视频事实 JSON：
+{json.dumps(facts, ensure_ascii=False)}
 
 请严格输出 JSON，字段如下：
 {{
@@ -116,7 +197,7 @@ class MiniMaxClient:
 }}
 
 要求：
-1. 基于视频真实内容，不要虚构不存在的主体、品牌、文字。
+1. 只能基于视频事实 JSON，不要虚构不存在的主体、品牌、文字。
 2. seedance_prompt 必须包含主体、场景、动作、运镜、光线、风格、画质、节奏。
 3. 如果视频像实拍素材，优先写成可复现原视频的提示词。
 4. 如果有明显镜头运动，请具体描述为推进、跟拍、环绕、摇镜、俯拍、低机位等。

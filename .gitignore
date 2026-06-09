@@ -12,6 +12,8 @@ frontend/*.tsbuildinfo
 frontend/.env
 frontend/.env.local
 frontend/.env.*.local
+frontend/test-results/
+frontend/playwright-report/
 .evolution/
 
 # Logs and local caches

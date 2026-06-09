@@ -73,6 +73,12 @@ h1 {
   line-height: 1.55;
 }
 
+.runtime-line {
+  margin-top: 12px;
+  color: #6c7972;
+  font-size: 12px;
+}
+
 .work-panel,
 .result-panel {
   padding: 16px;
@@ -133,6 +139,26 @@ h1 {
   background: #0f1513;
 }
 
+.file-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid #e2e8df;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #33443d;
+  font-size: 13px;
+}
+
+.file-meta span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .form-grid {
   display: grid;
   gap: 10px;
@@ -160,11 +186,16 @@ h1 {
 
 .primary-action {
   height: 48px;
-  margin-top: 16px;
   background: #20765b;
   border-color: #20765b;
   font-size: 16px;
   font-weight: 700;
+}
+
+.action-grid {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
 }
 
 .progress-card {
@@ -196,6 +227,67 @@ h1 {
 .result-panel {
   display: grid;
   gap: 12px;
+}
+
+.history-panel {
+  display: grid;
+  gap: 8px;
+  padding: 16px;
+}
+
+.history-panel header,
+.result-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.history-panel h2 {
+  margin: 0;
+  color: #1f302a;
+  font-size: 16px;
+}
+
+.history-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid #e2e8df;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #263731;
+  font: inherit;
+  text-align: left;
+}
+
+.history-item span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-item strong {
+  flex: 0 0 auto;
+  color: #20765b;
+  font-size: 12px;
+}
+
+.prompt-editor {
+  width: 100%;
+  min-height: 150px;
+  resize: vertical;
+  padding: 12px;
+  border: 1px solid #cddbd4;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #263731;
+  font-size: 14px;
+  line-height: 1.7;
 }
 
 .result-block {

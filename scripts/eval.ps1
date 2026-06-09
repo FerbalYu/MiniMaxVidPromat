@@ -44,6 +44,16 @@ Invoke-Step "frontend build" {
     }
 }
 
+Invoke-Step "frontend e2e" {
+    Push-Location (Join-Path $root "frontend")
+    try {
+        Invoke-Native npx playwright test
+    }
+    finally {
+        Pop-Location
+    }
+}
+
 Invoke-Step "backend compile" {
     Push-Location (Join-Path $root "backend")
     try {

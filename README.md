@@ -46,6 +46,18 @@ npm run dev
 .\scripts\dev.ps1
 ```
 
+首次拉取项目可先执行：
+
+```powershell
+.\scripts\setup.ps1
+```
+
+如果希望由后端同源托管前端构建产物：
+
+```powershell
+.\scripts\start.ps1
+```
+
 手机访问：
 
 ```text
@@ -111,3 +123,25 @@ MiniMax 的 Files API 在视频场景下的 `purpose` 如有变化，只需要�
 ```
 
 具体适应度函数和候选报告格式见 `docs/AUTORESEARCH.md`。
+
+真实 MiniMax API 手动验收：
+
+```powershell
+.\scripts\real-e2e.ps1 -VideoPath C:\path\to\sample.mp4
+```
+
+该命令会读取 `backend/.env`，需要先配置 `MINIMAX_API_KEY`。
+
+## Docker 运行
+
+准备好 `backend/.env` 后，可使用：
+
+```powershell
+docker compose up --build
+```
+
+访问：
+
+```text
+http://127.0.0.1:8000
+```

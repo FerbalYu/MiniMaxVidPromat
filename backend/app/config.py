@@ -15,6 +15,11 @@ class Settings(BaseSettings):
     max_upload_mb: int = Field(default=500, alias="MAX_UPLOAD_MB")
     upload_dir: Path = Field(default=Path("./storage/uploads"), alias="UPLOAD_DIR")
     result_dir: Path = Field(default=Path("./storage/results"), alias="RESULT_DIR")
+    database_path: Path = Field(default=Path("./storage/jobs.sqlite"), alias="DATABASE_PATH")
+    max_concurrent_jobs: int = Field(default=1, alias="MAX_CONCURRENT_JOBS")
+    job_retention_hours: int = Field(default=72, alias="JOB_RETENTION_HOURS")
+    minimax_request_timeout_seconds: int = Field(default=180, alias="MINIMAX_REQUEST_TIMEOUT_SECONDS")
+    minimax_repair_json: bool = Field(default=True, alias="MINIMAX_REPAIR_JSON")
     allowed_origins: str = Field(
         default="http://localhost:5173,http://127.0.0.1:5173",
         alias="ALLOWED_ORIGINS",
@@ -32,4 +37,5 @@ def get_settings() -> Settings:
     settings = Settings()
     settings.upload_dir.mkdir(parents=True, exist_ok=True)
     settings.result_dir.mkdir(parents=True, exist_ok=True)
+    settings.database_path.parent.mkdir(parents=True, exist_ok=True)
     return settings

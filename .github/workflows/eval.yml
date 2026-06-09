@@ -27,6 +27,10 @@ jobs:
         working-directory: frontend
         run: npm ci
 
+      - name: Install Playwright Chromium
+        working-directory: frontend
+        run: npx playwright install chromium
+
       - name: Install backend dependencies
         working-directory: backend
         run: pip install -r requirements.txt
@@ -34,4 +38,3 @@ jobs:
       - name: Run eval
         shell: pwsh
         run: .\scripts\eval.ps1
-

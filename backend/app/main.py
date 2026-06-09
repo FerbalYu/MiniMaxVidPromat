@@ -1,16 +1,23 @@
+import threading
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from .config import get_settings
 from .jobs import job_store
 from .minimax_client import MiniMaxClient
-from .schemas import CreateJobResponse, JobPublic, JobRecord, JobStatus, PromptMode
+from .schemas import CreateJobResponse, JobActionResponse, JobPublic, JobRecord, JobStatus, PromptMode
 
 settings = get_settings()
+job_store.configure(settings.database_path)
 UPLOAD_CHUNK_SIZE = 1024 * 1024
+executor = ThreadPoolExecutor(max_workers=max(1, settings.max_concurrent_jobs))
+job_futures: dict[str, Future] = {}
+job_futures_lock = threading.Lock()
 
 app = FastAPI(title="Video Prompt Local Server", version="0.1.0")
 app.add_middleware(
@@ -28,16 +35,19 @@ def health() -> dict:
         "ok": True,
         "model": settings.minimax_model,
         "files_api_enabled": settings.minimax_enable_files_api,
+        "max_upload_mb": _max_upload_size_mb(),
+        "max_concurrent_jobs": max(1, settings.max_concurrent_jobs),
+        "job_retention_hours": settings.job_retention_hours,
     }
 
 
 @app.post("/api/jobs", response_model=CreateJobResponse)
 async def create_job(
-    background_tasks: BackgroundTasks,
     video: UploadFile = File(...),
     prompt_mode: PromptMode = Form(PromptMode.standard),
     language: str = Form("zh"),
 ) -> CreateJobResponse:
+    job_store.cleanup_finished(older_than_seconds=settings.job_retention_hours * 60 * 60)
     if not video.filename:
         raise HTTPException(status_code=400, detail="缺少视频文件名")
     suffix = Path(video.filename).suffix.lower()
@@ -76,8 +86,8 @@ async def create_job(
     )
     final_path = settings.upload_dir / f"{job.id}{suffix}"
     temp_path.replace(final_path)
-    job_store.update(job.id, meta={"path": str(final_path)})
-    background_tasks.add_task(process_job, job.id)
+    job_store.update(job.id, meta={"path": str(final_path), "submitted_at": job.created_at})
+    submit_job(job.id)
     return CreateJobResponse(job_id=job.id, status=job.status)
 
 
@@ -94,9 +104,67 @@ def list_jobs() -> list[JobPublic]:
     return [_to_public_job(job) for job in job_store.list_recent()]
 
 
+@app.post("/api/jobs/{job_id}/cancel", response_model=JobActionResponse)
+def cancel_job(job_id: str) -> JobActionResponse:
+    job = job_store.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    if job.status == JobStatus.completed:
+        return JobActionResponse(job_id=job_id, status=job.status, message="任务已完成")
+    if job.status == JobStatus.failed:
+        return JobActionResponse(job_id=job_id, status=job.status, message="任务已失败")
+    if job.status == JobStatus.canceled:
+        return JobActionResponse(job_id=job_id, status=job.status, message="任务已取消")
+
+    with job_futures_lock:
+        future = job_futures.get(job_id)
+        canceled_future = future.cancel() if future else False
+    if job.status == JobStatus.processing and not canceled_future:
+        raise HTTPException(status_code=409, detail="任务正在处理，当前不能安全取消")
+
+    job_store.delete_file(job)
+    updated = job_store.update(
+        job_id,
+        status=JobStatus.canceled,
+        progress=100,
+        message="任务已取消",
+        error="任务已取消",
+    )
+    return JobActionResponse(job_id=job_id, status=updated.status if updated else JobStatus.canceled, message="任务已取消")
+
+
+@app.post("/api/jobs/{job_id}/retry", response_model=CreateJobResponse)
+def retry_job(job_id: str) -> CreateJobResponse:
+    job = job_store.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    if job.status not in {JobStatus.failed, JobStatus.canceled}:
+        raise HTTPException(status_code=409, detail="仅失败或已取消任务可重试")
+    video_path = job_store.get_path(job_id)
+    if not video_path or not video_path.exists():
+        raise HTTPException(status_code=410, detail="原始视频已清理，请重新上传")
+    job_store.update(job_id, status=JobStatus.queued, progress=0, message="已重新提交，等待处理", error="")
+    submit_job(job_id)
+    return CreateJobResponse(job_id=job_id, status=JobStatus.queued)
+
+
+@app.post("/api/jobs/cleanup")
+def cleanup_jobs() -> dict:
+    removed = job_store.cleanup_finished(older_than_seconds=settings.job_retention_hours * 60 * 60)
+    return {"removed": removed}
+
+
+def submit_job(job_id: str) -> None:
+    future = executor.submit(process_job, job_id)
+    with job_futures_lock:
+        job_futures[job_id] = future
+
+
 def process_job(job_id: str) -> None:
     job = job_store.get(job_id)
     if not job:
+        return
+    if job.status == JobStatus.canceled:
         return
     video_path_str = job.meta.get("path")
     video_path = Path(video_path_str) if video_path_str else job_store.get_path(job_id)
@@ -110,6 +178,9 @@ def process_job(job_id: str) -> None:
         )
         return
     try:
+        current = job_store.get(job_id)
+        if current and current.status == JobStatus.canceled:
+            return
         job_store.update(job_id, status=JobStatus.processing, progress=20, message="正在准备 MiniMax 请求")
         client = MiniMaxClient(settings)
         job_store.update(job_id, progress=45, message="正在调用 MiniMax-M3 识别视频")
@@ -130,6 +201,8 @@ def process_job(job_id: str) -> None:
             error=str(exc),
         )
     finally:
+        with job_futures_lock:
+            job_futures.pop(job_id, None)
         if video_path and video_path.exists():
             video_path.unlink(missing_ok=True)
 
@@ -148,3 +221,8 @@ def _to_public_job(job: JobRecord) -> JobPublic:
     payload = job.model_dump()
     payload["meta"] = {key: value for key, value in job.meta.items() if key != "path"}
     return JobPublic(**payload)
+
+
+frontend_dist = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+if frontend_dist.exists():
+    app.mount("/", StaticFiles(directory=frontend_dist, html=True), name="frontend")
